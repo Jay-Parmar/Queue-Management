@@ -8,7 +8,7 @@ class Kiosk(models.Model):
     body = models.TextField(help_text="Additional Information about the Kiosk")
 
     def __str__(self) -> str:
-        return f"{self.id} - {self.body}"
+        return f"{self.id} - {self.body} - Available: {self.is_available}"
 
 
 class Adam(models.Model):
@@ -34,5 +34,7 @@ class Ticket(models.Model):
     is_resolved = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
+    def __str__(self) -> str:
+        return f"{self.id} - Resolved: {self.is_resolved}"
 
 
