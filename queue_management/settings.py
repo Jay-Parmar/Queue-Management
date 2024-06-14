@@ -31,12 +31,16 @@ ALLOWED_HOSTS = []
 # Application definition
 
 INSTALLED_APPS = [
+    "channels",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    'rest_framework',
+    "apps.web_sockets",
+    "apps.tickets",
 ]
 
 MIDDLEWARE = [
@@ -67,7 +71,8 @@ TEMPLATES = [
     },
 ]
 
-WSGI_APPLICATION = "queue_management.wsgi.application"
+# WSGI_APPLICATION = "queue_management.wsgi.application"
+ASGI_APPLICATION = "queue_management.asgi.application"
 
 
 # Database
