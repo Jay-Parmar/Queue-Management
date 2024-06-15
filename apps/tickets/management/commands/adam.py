@@ -1,4 +1,5 @@
 import time
+import winsound
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from django.core.management.base import BaseCommand
@@ -29,7 +30,7 @@ class AdamService:
         modbus_client.write_multiple_coils(address, values)
 
 
-def create_ticket():
+def create_ticket() -> int:
     ticket = Ticket.objects.create()
     print(f":::Ticket no. {ticket.id} is created")
     async_to_sync(layer.group_send)(socket_constants.default_group, {
@@ -37,6 +38,7 @@ def create_ticket():
         'message': {'status': 'created', 'info': f":::Ticket no. {ticket.id} is created"}
     })
     assign_ticket_to_kiosk()
+    return ticket.id
 
 def assign_ticket_to_kiosk() -> None:
     tickets = Ticket.objects.filter(is_resolved=False).order_by('created_at')
@@ -54,8 +56,10 @@ def assign_ticket_to_kiosk() -> None:
         kiosk.is_available = False
         updated_tickets.append(ticket)
         updated_kiosks.append(kiosk)
-        # ticket.save()
-        # kiosk.save()
+    
+    frequency = 500
+    duration = 500
+    winsound.Beep(frequency, duration)
     Kiosk.objects.bulk_update(updated_kiosks, ['is_available'])
     Ticket.objects.bulk_update(updated_tickets, ['is_resolved', 'kiosk'])
 
@@ -77,8 +81,8 @@ def monitor_buttons(ip, port, start_address, num_buttons):
                         adam = Adam.objects.filter(ip=ip, port=port, address=i+start_address).first()
                         if adam:
                             if adam.type==Adam.CREATE_TICKET:
-                                create_ticket()
-                                # call_printer()
+                                ticket_id = create_ticket()
+                                # call_printer(ticket_id)
                             else:
                                 make_kiosk_available(adam)
                                 assign_ticket_to_kiosk()

@@ -38,3 +38,7 @@ class Ticket(models.Model):
         return f"{self.id} - Resolved: {self.is_resolved}"
 
 
+class Report(models.Model):
+    date = models.DateField(auto_now_add=True)
+    report = models.JSONField(default=dict, blank=True)
+
