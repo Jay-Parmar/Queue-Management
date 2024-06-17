@@ -1,4 +1,5 @@
 import time
+import datetime
 import winsound
 import win32print
 import win32ui
@@ -8,12 +9,14 @@ from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from django.core.management.base import BaseCommand
 from pyModbusTCP.client import ModbusClient
+from django.conf import settings
 
 from apps.tickets.models import Adam, Kiosk, Ticket
 from apps.web_sockets import constants as socket_constants
 from apps.tickets.cron import get_number_tickets_solved
 
 layer = get_channel_layer()
+ignore_until = datetime.datetime.now()
 
 
 class AdamService:
@@ -99,7 +102,7 @@ def call_printer(ticket_number: int):
             header = "Prayagraj Nagar Nigam"
             header_width, header_height = hDC.GetTextExtent(header)
 
-            pil_image = Image.open("C:\\Users\\Demo\\Downloads\\pnn_logo.png")
+            pil_image = Image.open(settings.MEDIA_ROOT + "\\pnn_logo.png")
             image_width = header_width // 2
             scale_factor = image_width / pil_image.width
             image_height = int(pil_image.height * scale_factor)
@@ -152,22 +155,24 @@ def call_printer(ticket_number: int):
 
 def monitor_buttons(ip, port, start_address, num_buttons):
     modbus_client = AdamService.connect_modbus(ip, port)
+    global ignore_until
     try:
         last_state = [False] * num_buttons  # Initialize last known state
         while True:
             current_state = AdamService.read_coils(modbus_client, start_address, num_buttons)
             if current_state:
-                for i, state in enumerate(current_state):
-                    if state != last_state[i] and state:
-                        print(f"Button {i + start_address} pressed")
-                        adam = Adam.objects.filter(ip=ip, port=port, address=i+start_address).first()
-                        if adam:
-                            if adam.type==Adam.CREATE_TICKET:
-                                ticket_id = create_ticket()
-                                call_printer(ticket_id)
-                            else:
-                                make_kiosk_available(adam)
-                                assign_ticket_to_kiosk()
+                if datetime.datetime.now() > ignore_until:
+                    for i, state in enumerate(current_state):
+                        if state != last_state[i] and state:
+                            print(f"Button {i + start_address} pressed")
+                            adam = Adam.objects.filter(ip=ip, port=port, address=i+start_address).first()
+                            if adam:
+                                if adam.type==Adam.CREATE_TICKET:
+                                    ticket_id = create_ticket()
+                                    call_printer(ticket_id)
+                                else:
+                                    make_kiosk_available(adam)
+                                    assign_ticket_to_kiosk()
                 last_state = current_state
             time.sleep(0.1)  # Polling interval
     finally:
@@ -183,6 +188,8 @@ NUM_BUTTONS = 25
 class Command(BaseCommand):
     help = 'Listens to specified COM ports and logs data'
     def handle(self, *args, **options):
+        global ignore_until
+        ignore_until = datetime.datetime.now() + datetime.timedelta(seconds=2)
         monitor_buttons(IP_ADDRESS, PORT, START_ADDRESS, NUM_BUTTONS)
 
 
