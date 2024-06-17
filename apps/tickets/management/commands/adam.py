@@ -1,5 +1,9 @@
 import time
 import winsound
+import win32print
+import win32ui
+from win32con import *
+from PIL import Image, ImageWin
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from django.core.management.base import BaseCommand
@@ -7,6 +11,7 @@ from pyModbusTCP.client import ModbusClient
 
 from apps.tickets.models import Adam, Kiosk, Ticket
 from apps.web_sockets import constants as socket_constants
+from apps.tickets.cron import get_number_tickets_solved
 
 layer = get_channel_layer()
 
@@ -49,7 +54,7 @@ def assign_ticket_to_kiosk() -> None:
         print(f":::Ticket no. {ticket.id} is assigned to Kiosk {kiosk.kiosk_number}")
         async_to_sync(layer.group_send)(socket_constants.default_group, {
             'type': 'send.message',
-            'message': {'status': 'assigned', 'ticket': f'{ticket.id}', 'kiosk': f'{kiosk.kiosk_number}'}
+            'message': {'status': 'assigned', 'ticket': f'{ticket.id}', 'kiosk': f'{kiosk.id}', 'total_solved': get_number_tickets_solved()}
         })
         ticket.is_resolved = True
         ticket.kiosk = kiosk
@@ -57,9 +62,12 @@ def assign_ticket_to_kiosk() -> None:
         updated_tickets.append(ticket)
         updated_kiosks.append(kiosk)
     
-    frequency = 500
-    duration = 500
-    winsound.Beep(frequency, duration)
+    
+    if len(tickets):
+        frequency = 500
+        duration = 500
+        winsound.Beep(frequency, duration)
+
     Kiosk.objects.bulk_update(updated_kiosks, ['is_available'])
     Ticket.objects.bulk_update(updated_tickets, ['is_resolved', 'kiosk'])
 
@@ -67,6 +75,80 @@ def make_kiosk_available(adam: Adam):
     kiosk = adam.kiosk
     kiosk.is_available = True
     kiosk.save()
+
+def call_printer(ticket_number: int):
+    printer_name = win32print.GetDefaultPrinter()
+    try:
+        hPrinter = win32print.OpenPrinter(printer_name)
+        try:
+            hDC = win32ui.CreateDC()
+            hDC.CreatePrinterDC(printer_name)
+            hDC.StartDoc("Ticket Print Job")
+            hDC.StartPage()
+            
+            x_start, y_start = 25, 0
+            ticket_width, ticket_height = 350, 150
+
+            header_font = win32ui.CreateFont({
+                'name': 'Arial',
+                'height': -24,
+                'weight': FW_BOLD,
+            })
+            
+            # Header output
+            header = "Prayagraj Nagar Nigam"
+            header_width, header_height = hDC.GetTextExtent(header)
+
+            pil_image = Image.open("C:\\Users\\Demo\\Downloads\\pnn_logo.png")
+            image_width = header_width // 2
+            scale_factor = image_width / pil_image.width
+            image_height = int(pil_image.height * scale_factor)
+            pil_image_resized = pil_image.resize((image_width, image_height), Image.Resampling.LANCZOS)
+
+            pil_image_gray = pil_image_resized.convert('L')  # Convert to grayscale
+            # Convert grayscale to black and white
+            threshold = 128 # Threshold can be adjusted
+            pil_image_bw = pil_image_gray.point(lambda x: 255 if x > threshold else 0, '1')
+
+            dib = ImageWin.Dib(pil_image_bw)
+            image_x_start = x_start + (ticket_width - image_width) // 2  # Center the image
+
+            dib.draw(hDC.GetHandleOutput(), (image_x_start, y_start + 10, image_x_start + image_width, y_start + 10 + image_height))
+
+            # Draw a border
+            # hDC.Rectangle((x_start, y_start, x_start + ticket_width, y_start + ticket_height))
+            
+            header_y_start = y_start + 10 + image_height + 10
+            hDC.SelectObject(header_font)
+            hDC.TextOut((x_start + (ticket_width - header_width) // 2), header_y_start, header)
+            
+            ticket_font = win32ui.CreateFont({
+                'name': 'Arial',
+                'height': -20,
+            })
+            # Ticket number output
+            hDC.SelectObject(ticket_font)
+            ticket_info = f"Ticket Number:"
+            text_width, text_height = hDC.GetTextExtent(ticket_info)
+            hDC.TextOut((x_start + (ticket_width - text_width) // 2), header_y_start + 40, ticket_info)
+
+            ticket_font = win32ui.CreateFont({
+                'name': 'Arial',
+                'height': -70,
+            })
+            hDC.SelectObject(ticket_font)
+            number_width, number_height = hDC.GetTextExtent(str(ticket_number))
+            hDC.TextOut((x_start + (ticket_width - number_width) // 2), header_y_start + 70, str(ticket_number))
+            
+            hDC.EndPage()
+            hDC.EndDoc()
+            print(f"Printed Ticket Number: {ticket_number}")
+        # except Exception as aaaa:
+        #     raise
+        finally:
+            win32print.ClosePrinter(hPrinter)
+    except Exception as e:
+        print(f"Failed to print: {e}")
 
 def monitor_buttons(ip, port, start_address, num_buttons):
     modbus_client = AdamService.connect_modbus(ip, port)
@@ -82,7 +164,7 @@ def monitor_buttons(ip, port, start_address, num_buttons):
                         if adam:
                             if adam.type==Adam.CREATE_TICKET:
                                 ticket_id = create_ticket()
-                                # call_printer(ticket_id)
+                                call_printer(ticket_id)
                             else:
                                 make_kiosk_available(adam)
                                 assign_ticket_to_kiosk()
@@ -94,8 +176,8 @@ def monitor_buttons(ip, port, start_address, num_buttons):
 # Constants for IP, port, etc.
 IP_ADDRESS = "192.168.0.81"
 PORT = 502
-START_ADDRESS = 16
-NUM_BUTTONS = 7
+START_ADDRESS = 0
+NUM_BUTTONS = 25
 
 
 class Command(BaseCommand):
